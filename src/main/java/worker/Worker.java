@@ -1,0 +1,226 @@
+package worker;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import llama.LlamaClient;
+import model.Result;
+import model.Task;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.*;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class Worker implements Runnable {
+
+    private static final Logger log = LoggerFactory.getLogger(Worker.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("-?\\d+");
+
+    private final String       workerId;
+    private final WorkerConfig config;
+    private final SqsClient    sqs;
+    private final DynamoDbClient dynamo;
+    private final LlamaClient  llama;
+
+    public Worker(String workerId, WorkerConfig config) {
+        this.workerId = workerId;
+        this.config   = config;
+
+        this.sqs = SqsClient.builder()
+            .region(Region.of(config.awsRegion))
+            .build();
+
+        this.dynamo = DynamoDbClient.builder()
+            .region(Region.of(config.awsRegion))
+            .build();
+
+        this.llama = new LlamaClient(config.ollamaUrl, config.ollamaModel);
+    }
+
+    @Override
+    public void run() {
+        log.info("[{}] Worker iniciado. Aguardando mensagens em {}", workerId, config.sqsQueueUrl);
+
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                List<Message> messages = poll();
+                if (messages.isEmpty()) {
+                    log.debug("[{}] Fila vazia, aguardando...", workerId);
+                    continue;
+                }
+
+                for (Message msg : messages) {
+                    processMessage(msg);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.info("[{}] Worker interrompido.", workerId);
+                break;
+            } catch (Exception e) {
+                log.error("[{}] Erro inesperado no loop principal: {}", workerId, e.getMessage(), e);
+            }
+        }
+    }
+
+    // ── Poll SQS ─────────────────────────────────────────────────────────────
+
+    private List<Message> poll() {
+        ReceiveMessageRequest req = ReceiveMessageRequest.builder()
+            .queueUrl(config.sqsQueueUrl)
+            .maxNumberOfMessages(1)
+            .waitTimeSeconds(20)          // long polling — reduz custo e latência
+            .visibilityTimeout(120)       // 2 min para processar
+            .build();
+
+        return sqs.receiveMessage(req).messages();
+    }
+
+    // ── Process ───────────────────────────────────────────────────────────────
+
+    private void processMessage(Message msg) throws InterruptedException {
+        Task task;
+        try {
+            task = MAPPER.readValue(msg.body(), Task.class);
+        } catch (Exception e) {
+            log.error("[{}] Mensagem inválida (não é um Task): {} | body: {}",
+                      workerId, e.getMessage(), msg.body());
+            deleteMessage(msg); // descarta mensagens malformadas
+            return;
+        }
+
+        log.info("[{}] Processando task={} question_id={}", workerId, task.taskId, task.questionId);
+
+        Result result = execute(task);
+        saveResult(result);
+        deleteMessage(msg);
+
+        log.info("[{}] task={} | correto={} | latência={}ms | resposta={}",
+                 workerId, task.taskId, result.correct, result.latencyMs, result.parsedAnswer);
+    }
+
+    // ── Execute with retry ────────────────────────────────────────────────────
+
+    private Result execute(Task task) throws InterruptedException {
+        String prompt = buildPrompt(task);
+        Exception lastError = null;
+
+        for (int attempt = 1; attempt <= config.maxRetries; attempt++) {
+            long start = System.currentTimeMillis();
+            try {
+                String raw = llama.generate(prompt, 90);
+                long latency = System.currentTimeMillis() - start;
+                Integer parsed = parseAnswer(raw);
+                return Result.success(task, workerId, raw, parsed, latency);
+
+            } catch (Exception e) {
+                long latency = System.currentTimeMillis() - start;
+                lastError = e;
+                log.warn("[{}] Tentativa {}/{} falhou ({}ms): {}",
+                         workerId, attempt, config.maxRetries, latency, e.getMessage());
+
+                if (attempt < config.maxRetries) {
+                    Thread.sleep(1000L * attempt); // back-off simples
+                }
+            }
+        }
+
+        return Result.failure(task, workerId, lastError.getMessage(), 0);
+    }
+
+    // ── Prompt builder ────────────────────────────────────────────────────────
+
+    private String buildPrompt(Task task) {
+        // Adapta o prompt de acordo com a estratégia definida na task
+        return switch (task.strategy == null ? "default" : task.strategy.toLowerCase()) {
+            case "chain-of-thought", "cot" ->
+                "Resolva passo a passo e ao final responda APENAS com o número inteiro.\n\nPergunta: " + task.question;
+            case "direct" ->
+                "Responda APENAS com o número inteiro, sem explicação.\n\nPergunta: " + task.question;
+            default ->
+                "Responda a pergunta abaixo. Ao final, coloque o número da resposta sozinho na última linha.\n\nPergunta: " + task.question;
+        };
+    }
+
+    // ── Answer parser ─────────────────────────────────────────────────────────
+
+    /**
+     * Extrai o primeiro número inteiro encontrado na resposta.
+     * Pega o último número caso haja vários (comum em CoT).
+     */
+    private Integer parseAnswer(String raw) {
+        Matcher m = NUMBER_PATTERN.matcher(raw);
+        Integer last = null;
+        while (m.find()) {
+            try {
+                last = Integer.parseInt(m.group());
+            } catch (NumberFormatException ignored) {}
+        }
+        return last;
+    }
+
+    // ── DynamoDB ──────────────────────────────────────────────────────────────
+
+    private void saveResult(Result r) {
+        try {
+            Map<String, AttributeValue> item = new HashMap<>();
+            item.put("task_id",         str(r.taskId));
+            item.put("question_id",     str(r.questionId));
+            item.put("worker_id",       str(r.workerId));
+            item.put("strategy",        str(r.strategy));
+            item.put("prompt_version",  str(r.promptVersion));
+            item.put("question",        str(r.question));
+            item.put("expected_answer", num(r.expectedAnswer));
+            item.put("parsed_answer",   r.parsedAnswer != null ? num(r.parsedAnswer) : str("null"));
+            item.put("correct",         bool(r.correct));
+            item.put("latency_ms",      num(r.latencyMs));
+            item.put("finished_at",     num(r.finishedAt));
+            if (r.rawResponse != null)  item.put("raw_response", str(r.rawResponse));
+            if (r.error != null)        item.put("error",        str(r.error));
+
+            dynamo.putItem(PutItemRequest.builder()
+                .tableName(config.dynamoTable)
+                .item(item)
+                .build());
+
+        } catch (Exception e) {
+            log.error("[{}] Erro ao salvar no DynamoDB (task={}): {}", workerId, r.taskId, e.getMessage(), e);
+        }
+    }
+
+    // ── SQS delete ────────────────────────────────────────────────────────────
+
+    private void deleteMessage(Message msg) {
+        try {
+            sqs.deleteMessage(DeleteMessageRequest.builder()
+                .queueUrl(config.sqsQueueUrl)
+                .receiptHandle(msg.receiptHandle())
+                .build());
+        } catch (Exception e) {
+            log.warn("[{}] Não foi possível deletar mensagem da SQS: {}", workerId, e.getMessage());
+        }
+    }
+
+    // ── AttributeValue helpers ────────────────────────────────────────────────
+
+    private static AttributeValue str(String v) {
+        return AttributeValue.builder().s(v != null ? v : "").build();
+    }
+    private static AttributeValue num(long v) {
+        return AttributeValue.builder().n(String.valueOf(v)).build();
+    }
+    private static AttributeValue num(int v) {
+        return AttributeValue.builder().n(String.valueOf(v)).build();
+    }
+    private static AttributeValue bool(boolean v) {
+        return AttributeValue.builder().bool(v).build();
+    }
+}

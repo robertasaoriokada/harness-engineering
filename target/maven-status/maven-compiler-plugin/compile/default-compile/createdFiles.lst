@@ -1,0 +1,8 @@
+model\Task.class
+llama\LlamaClient.class
+producer\Producer.class
+worker\Worker.class
+worker\WorkerConfig.class
+model\Result.class
+worker\WorkerMain.class
+worker\WorkerConfig$Builder.class
