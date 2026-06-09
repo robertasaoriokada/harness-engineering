@@ -31,14 +31,14 @@ public class LlamaClient {
     }
 
     /**
-     * Envia um prompt ao Ollama e retorna o texto da resposta.
+     * Envia um prompt ao Ollama e retorna texto + contadores de tokens.
      *
      * @param prompt texto do prompt
      * @param timeoutSeconds timeout total da requisição
-     * @return resposta do modelo
+     * @return GenerateResponse com texto, promptTokens e completionTokens
      * @throws IOException em caso de erro HTTP ou parsing
      */
-    public String generate(String prompt, int timeoutSeconds) throws IOException, InterruptedException {
+    public GenerateResponse generate(String prompt, int timeoutSeconds) throws IOException, InterruptedException {
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model",  model);
         body.put("prompt", prompt);
@@ -67,6 +67,12 @@ public class LlamaClient {
             throw new IOException("Campo 'response' ausente na resposta do Ollama: " + response.body());
         }
 
-        return responseNode.asText().trim();
+        int promptTokens     = json.path("prompt_eval_count").asInt(0);
+        int completionTokens = json.path("eval_count").asInt(0);
+
+        log.debug("Tokens — prompt={} completion={} total={}",
+                  promptTokens, completionTokens, promptTokens + completionTokens);
+
+        return new GenerateResponse(responseNode.asText().trim(), promptTokens, completionTokens);
     }
 }

@@ -1,0 +1,3 @@
+Responda APENAS com o número inteiro final, sem nenhuma explicação, sem unidade, sem texto adicional.
+
+Pergunta: {{question}}

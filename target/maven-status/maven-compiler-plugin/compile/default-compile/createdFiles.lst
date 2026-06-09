@@ -1,8 +1,12 @@
 model\Task.class
+model\Result.class
+worker\VoteAggregator$VoteResult.class
+worker\VoteAggregator.class
 llama\LlamaClient.class
 producer\Producer.class
 worker\Worker.class
 worker\WorkerConfig.class
-model\Result.class
+worker\AggregatorMain.class
+llama\GenerateResponse.class
 worker\WorkerMain.class
 worker\WorkerConfig$Builder.class

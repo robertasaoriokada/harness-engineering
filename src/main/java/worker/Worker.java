@@ -1,6 +1,7 @@
 package worker;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import llama.GenerateResponse;
 import llama.LlamaClient;
 import model.Result;
 import model.Task;
@@ -13,9 +14,14 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.*;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,6 +30,9 @@ public class Worker implements Runnable {
     private static final Logger log = LoggerFactory.getLogger(Worker.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern NUMBER_PATTERN = Pattern.compile("-?\\d+");
+
+    /** Cache de templates de prompt carregados do disco (evita I/O repetido). */
+    private static final ConcurrentHashMap<String, String> PROMPT_CACHE = new ConcurrentHashMap<>();
 
     private final String       workerId;
     private final WorkerConfig config;
@@ -103,8 +112,9 @@ public class Worker implements Runnable {
         saveResult(result);
         deleteMessage(msg);
 
-        log.info("[{}] task={} | correto={} | latência={}ms | resposta={}",
-                 workerId, task.taskId, result.correct, result.latencyMs, result.parsedAnswer);
+        log.info("[{}] task={} | correto={} | latência={}ms | tokens={} | resposta={}",
+                 workerId, task.taskId, result.correct, result.latencyMs,
+                 result.promptTokens + result.completionTokens, result.parsedAnswer);
     }
 
     // ── Execute with retry ────────────────────────────────────────────────────
@@ -116,10 +126,11 @@ public class Worker implements Runnable {
         for (int attempt = 1; attempt <= config.maxRetries; attempt++) {
             long start = System.currentTimeMillis();
             try {
-                String raw = llama.generate(prompt, 90);
+                GenerateResponse gr = llama.generate(prompt, 180);
                 long latency = System.currentTimeMillis() - start;
-                Integer parsed = parseAnswer(raw);
-                return Result.success(task, workerId, raw, parsed, latency);
+                Integer parsed = parseAnswer(gr.text);
+                return Result.success(task, workerId, gr.text, parsed, latency,
+                                     gr.promptTokens, gr.completionTokens);
 
             } catch (Exception e) {
                 long latency = System.currentTimeMillis() - start;
@@ -128,26 +139,52 @@ public class Worker implements Runnable {
                          workerId, attempt, config.maxRetries, latency, e.getMessage());
 
                 if (attempt < config.maxRetries) {
-                    Thread.sleep(1000L * attempt); // back-off simples
+                    Thread.sleep(1000L * attempt); // back-off exponencial simples
                 }
             }
         }
 
-        return Result.failure(task, workerId, lastError.getMessage(), 0);
+        // ── FALLBACK ─────────────────────────────────────────────────────────
+        // Todas as tentativas esgotadas. Estratégia de fallback:
+        //   1. Registra o erro explicitamente com fallback=true no DynamoDB
+        //   2. parsed_answer = -1  (sentinela — distingue "falhou" de "sem número")
+        //   3. O item fica disponível para reprocessamento manual ou nova rodada
+        log.error("[{}] FALLBACK ativado para task={} question_id={} — Ollama indisponível após {} tentativas. Erro: {}",
+                  workerId, task.taskId, task.questionId, config.maxRetries, lastError.getMessage());
+
+        return Result.fallback(task, workerId, lastError.getMessage());
     }
 
     // ── Prompt builder ────────────────────────────────────────────────────────
 
     private String buildPrompt(Task task) {
-        // Adapta o prompt de acordo com a estratégia definida na task
-        return switch (task.strategy == null ? "default" : task.strategy.toLowerCase()) {
-            case "chain-of-thought", "cot" ->
-                "Resolva passo a passo e ao final responda APENAS com o número inteiro.\n\nPergunta: " + task.question;
-            case "direct" ->
-                "Responda APENAS com o número inteiro, sem explicação.\n\nPergunta: " + task.question;
-            default ->
-                "Responda a pergunta abaixo. Ao final, coloque o número da resposta sozinho na última linha.\n\nPergunta: " + task.question;
+        String strategy = (task.strategy == null) ? "zero-shot" : task.strategy.toLowerCase();
+        String fileName = switch (strategy) {
+            case "chain-of-thought", "cot" -> "chain-of-thought.txt";
+            case "self-consistency"        -> "self-consistency.txt";
+            default                        -> "zero-shot.txt";
         };
+
+        String template = PROMPT_CACHE.computeIfAbsent(fileName, f -> loadPromptFile(f));
+        return template.replace("{{question}}", task.question);
+    }
+
+    /**
+     * Carrega um arquivo de prompt do diretório PROMPTS_DIR (env) ou ./prompts/.
+     * Em caso de falha, usa um fallback inline para não travar o worker.
+     */
+    private static String loadPromptFile(String fileName) {
+        String dir = System.getenv("PROMPTS_DIR");
+        if (dir == null || dir.isBlank()) dir = "prompts";
+        Path path = Paths.get(dir, fileName);
+        try {
+            String template = Files.readString(path);
+            log.info("Prompt carregado: {}", path.toAbsolutePath());
+            return template;
+        } catch (IOException e) {
+            log.warn("Falha ao carregar prompt '{}': {} — usando fallback inline.", path, e.getMessage());
+            return "Responda a pergunta. Coloque o número inteiro na última linha.\n\nPergunta: {{question}}";
+        }
     }
 
     // ── Answer parser ─────────────────────────────────────────────────────────
@@ -181,8 +218,13 @@ public class Worker implements Runnable {
             item.put("expected_answer", num(r.expectedAnswer));
             item.put("parsed_answer",   r.parsedAnswer != null ? num(r.parsedAnswer) : str("null"));
             item.put("correct",         bool(r.correct));
+            item.put("fallback",        bool(r.fallback));
             item.put("latency_ms",      num(r.latencyMs));
             item.put("finished_at",     num(r.finishedAt));
+            item.put("run_index",          num(r.runIndex));
+            item.put("prompt_tokens",       num(r.promptTokens));
+            item.put("completion_tokens",   num(r.completionTokens));
+            item.put("total_tokens",        num(r.promptTokens + r.completionTokens));
             if (r.rawResponse != null)  item.put("raw_response", str(r.rawResponse));
             if (r.error != null)        item.put("error",        str(r.error));
 

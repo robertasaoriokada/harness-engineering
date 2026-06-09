@@ -21,10 +21,13 @@ import java.util.UUID;
  *   TASKS_FILE     — caminho do arquivo JSON com as tasks
  *
  * Variáveis opcionais:
- *   AWS_REGION     — padrão: us-east-1
+ *   AWS_REGION               — padrão: us-east-1
+ *   SELF_CONSISTENCY_RUNS    — quantas cópias disparar por task self-consistency (padrão: 5)
  *
- * Formato do arquivo JSON:
- *   [ { "question_id": "q1", "question": "Quanto é 2+2?", "expected_answer": 4, "strategy": "direct" }, ... ]
+ * Estratégias suportadas:
+ *   zero-shot        → 1 mensagem por task
+ *   chain-of-thought → 1 mensagem por task
+ *   self-consistency → N mensagens por task (run_index 1..N, para voto majoritário)
  *
  * Build:   mvn package   → gera target/producer.jar
  * Execução: java -jar target/producer.jar
@@ -38,6 +41,7 @@ public class Producer {
         String queueUrl  = require("SQS_QUEUE_URL");
         String tasksFile = require("TASKS_FILE");
         String region    = env("AWS_REGION", "us-east-1");
+        int scRuns       = Integer.parseInt(env("SELF_CONSISTENCY_RUNS", "5"));
 
         SqsClient sqs = SqsClient.builder()
             .region(Region.of(region))
@@ -46,32 +50,39 @@ public class Producer {
         // Lê o arquivo de tasks
         List<Task> tasks = Arrays.asList(MAPPER.readValue(new File(tasksFile), Task[].class));
         log.info("=== Producer iniciando ===");
-        log.info("Tasks     : {}", tasks.size());
-        log.info("Fila SQS  : {}", queueUrl);
+        log.info("Tasks                : {}", tasks.size());
+        log.info("Fila SQS             : {}", queueUrl);
+        log.info("Self-consistency runs: {}", scRuns);
 
         int sent = 0, failed = 0;
         long startTime = System.currentTimeMillis();
 
         for (Task task : tasks) {
-            // Garante que cada task tem um task_id único
             if (task.taskId == null || task.taskId.isBlank()) {
                 task.taskId = UUID.randomUUID().toString();
             }
-            // Marca o momento de publicação
-            task.publishedAt = System.currentTimeMillis() / 1000.0;
 
-            try {
-                String body = MAPPER.writeValueAsString(task);
-                sqs.sendMessage(SendMessageRequest.builder()
-                    .queueUrl(queueUrl)
-                    .messageBody(body)
-                    .build());
-                sent++;
-                log.debug("Enviado task_id={} question_id={}", task.taskId, task.questionId);
+            boolean isSC = "self-consistency".equalsIgnoreCase(task.strategy);
+            int copies = isSC ? scRuns : 1;
 
-            } catch (Exception e) {
-                failed++;
-                log.error("Falha ao enviar task_id={}: {}", task.taskId, e.getMessage());
+            for (int run = 1; run <= copies; run++) {
+                // Para self-consistency, clona o task com runIndex distinto
+                Task t = isSC ? copyWithRun(task, run) : task;
+                t.publishedAt = System.currentTimeMillis() / 1000.0;
+
+                try {
+                    String body = MAPPER.writeValueAsString(t);
+                    sqs.sendMessage(SendMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .messageBody(body)
+                        .build());
+                    sent++;
+                    log.debug("Enviado question_id={} strategy={} run={}/{}",
+                              t.questionId, t.strategy, run, copies);
+                } catch (Exception e) {
+                    failed++;
+                    log.error("Falha ao enviar question_id={} run={}: {}", t.questionId, run, e.getMessage());
+                }
             }
         }
 
@@ -90,5 +101,18 @@ public class Producer {
     private static String env(String key, String fallback) {
         String v = System.getenv(key);
         return (v != null && !v.isBlank()) ? v : fallback;
+    }
+
+    /** Cria uma cópia da task com task_id único e run_index definido (para self-consistency). */
+    private static Task copyWithRun(Task original, int runIndex) {
+        Task t = new Task();
+        t.taskId        = UUID.randomUUID().toString();
+        t.questionId    = original.questionId;
+        t.question      = original.question;
+        t.expectedAnswer = original.expectedAnswer;
+        t.strategy      = original.strategy;
+        t.promptVersion = original.promptVersion;
+        t.runIndex      = runIndex;
+        return t;
     }
 }

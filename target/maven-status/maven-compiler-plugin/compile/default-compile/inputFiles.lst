@@ -1,7 +1,10 @@
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\llama\LlamaClient.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\model\Result.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\model\Task.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\producer\Producer.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\worker\Worker.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\worker\WorkerConfig.java
-C:\Users\rober\Downloads\harness2\home\claude\harness\src\main\java\worker\WorkerMain.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\llama\GenerateResponse.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\llama\LlamaClient.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\model\Result.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\model\Task.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\producer\Producer.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\worker\AggregatorMain.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\worker\VoteAggregator.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\worker\Worker.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\worker\WorkerConfig.java
+C:\Users\roberta.o.cusinato\Desktop\harnessOficial\harness-engineering\src\main\java\worker\WorkerMain.java

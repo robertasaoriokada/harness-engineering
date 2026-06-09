@@ -1,0 +1,5 @@
+Resolva o problema passo a passo, mostrando cada etapa do raciocínio de forma clara.
+Considere múltiplas abordagens se necessário, mas chegue a uma única conclusão.
+Ao final, escreva APENAS o número inteiro da resposta na última linha, sem texto adicional.
+
+Pergunta: {{question}}

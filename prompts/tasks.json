@@ -1,20 +1,21 @@
 [
-  {
-    "question_id": "q001",
-    "question": "Quanto é 2 + 2?",
-    "expected_answer": 4,
-    "strategy": "direct"
-  },
-  {
-    "question_id": "q002",
-    "question": "Uma loja tem 50 maçãs. Vendeu 23. Quantas restaram?",
-    "expected_answer": 27,
-    "strategy": "chain-of-thought"
-  },
-  {
-    "question_id": "q003",
-    "question": "Se um trem viaja a 90 km/h por 2 horas, quantos km percorreu?",
-    "expected_answer": 180,
-    "strategy": "direct"
-  }
+  {"question_id": "gsm8k_001", "question": "Natalia vendeu clipes para 48 amigos em abril e depois vendeu metade dessa quantidade em maio. Quantos clipes ela vendeu ao todo em abril e maio?", "expected_answer": 72, "strategy": "zero-shot"},
+  {"question_id": "gsm8k_001", "question": "Natalia vendeu clipes para 48 amigos em abril e depois vendeu metade dessa quantidade em maio. Quantos clipes ela vendeu ao todo em abril e maio?", "expected_answer": 72, "strategy": "chain-of-thought"},
+  {"question_id": "gsm8k_001", "question": "Natalia vendeu clipes para 48 amigos em abril e depois vendeu metade dessa quantidade em maio. Quantos clipes ela vendeu ao todo em abril e maio?", "expected_answer": 72, "strategy": "self-consistency"},
+
+  {"question_id": "gsm8k_002", "question": "Weng ganha R$12 por hora cuidando de crianças. Ontem ela trabalhou 50 minutos. Quanto ela ganhou?", "expected_answer": 10, "strategy": "zero-shot"},
+  {"question_id": "gsm8k_002", "question": "Weng ganha R$12 por hora cuidando de crianças. Ontem ela trabalhou 50 minutos. Quanto ela ganhou?", "expected_answer": 10, "strategy": "chain-of-thought"},
+  {"question_id": "gsm8k_002", "question": "Weng ganha R$12 por hora cuidando de crianças. Ontem ela trabalhou 50 minutos. Quanto ela ganhou?", "expected_answer": 10, "strategy": "self-consistency"},
+
+  {"question_id": "gsm8k_003", "question": "Betty está juntando dinheiro para uma carteira de R$100. Ela só tem metade do valor necessário. Seus pais deram R$15 e seus avós deram o dobro do que os pais deram. Quanto dinheiro ainda falta para Betty comprar a carteira?", "expected_answer": 5, "strategy": "zero-shot"},
+  {"question_id": "gsm8k_003", "question": "Betty está juntando dinheiro para uma carteira de R$100. Ela só tem metade do valor necessário. Seus pais deram R$15 e seus avós deram o dobro do que os pais deram. Quanto dinheiro ainda falta para Betty comprar a carteira?", "expected_answer": 5, "strategy": "chain-of-thought"},
+  {"question_id": "gsm8k_003", "question": "Betty está juntando dinheiro para uma carteira de R$100. Ela só tem metade do valor necessário. Seus pais deram R$15 e seus avós deram o dobro do que os pais deram. Quanto dinheiro ainda falta para Betty comprar a carteira?", "expected_answer": 5, "strategy": "self-consistency"},
+
+  {"question_id": "gsm8k_004", "question": "Julie está lendo um livro de 120 páginas. Ontem leu 12 páginas e hoje leu o dobro de ontem. Se amanhã ela quiser ler metade das páginas restantes, quantas páginas deve ler?", "expected_answer": 42, "strategy": "zero-shot"},
+  {"question_id": "gsm8k_004", "question": "Julie está lendo um livro de 120 páginas. Ontem leu 12 páginas e hoje leu o dobro de ontem. Se amanhã ela quiser ler metade das páginas restantes, quantas páginas deve ler?", "expected_answer": 42, "strategy": "chain-of-thought"},
+  {"question_id": "gsm8k_004", "question": "Julie está lendo um livro de 120 páginas. Ontem leu 12 páginas e hoje leu o dobro de ontem. Se amanhã ela quiser ler metade das páginas restantes, quantas páginas deve ler?", "expected_answer": 42, "strategy": "self-consistency"},
+
+  {"question_id": "gsm8k_005", "question": "James escreve uma carta de 3 páginas para 2 amigos diferentes duas vezes por semana. Quantas páginas ele escreve por ano?", "expected_answer": 624, "strategy": "zero-shot"},
+  {"question_id": "gsm8k_005", "question": "James escreve uma carta de 3 páginas para 2 amigos diferentes duas vezes por semana. Quantas páginas ele escreve por ano?", "expected_answer": 624, "strategy": "chain-of-thought"},
+  {"question_id": "gsm8k_005", "question": "James escreve uma carta de 3 páginas para 2 amigos diferentes duas vezes por semana. Quantas páginas ele escreve por ano?", "expected_answer": 624, "strategy": "self-consistency"}
 ]

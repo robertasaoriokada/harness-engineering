@@ -26,4 +26,8 @@ public class Task {
 
     @JsonProperty("published_at")
     public double publishedAt;
+
+    /** Índice da rodada (1..N) para self-consistency; 0 nas demais estratégias. */
+    @JsonProperty("run_index")
+    public int runIndex = 0;
 }
